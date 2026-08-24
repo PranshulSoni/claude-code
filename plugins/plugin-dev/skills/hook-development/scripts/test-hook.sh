@@ -152,6 +152,11 @@ if [ ! -f "$TEST_INPUT" ]; then
 fi
 
 # Validate test input JSON
+if ! command -v jq >/dev/null 2>&1; then
+  echo "❌ Error: jq is required but was not found on PATH"
+  exit 1
+fi
+
 if ! jq empty "$TEST_INPUT" 2>/dev/null; then
   echo "❌ Error: Test input is not valid JSON"
   exit 1
