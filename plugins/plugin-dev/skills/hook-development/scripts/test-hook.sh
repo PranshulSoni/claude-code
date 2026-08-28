@@ -9,13 +9,17 @@ show_usage() {
   echo "Usage: $0 [options] <hook-script> <test-input.json>"
   echo ""
   echo "Options:"
-  echo "  -h, --help      Show this help message"
-  echo "  -v, --verbose   Show detailed execution information"
-  echo "  -t, --timeout N Set timeout in seconds (default: 60)"
+  echo "  -h, --help            Show this help message"
+  echo "  -v, --verbose         Show detailed execution information"
+  echo "  -t, --timeout N       Set timeout in seconds (default: 60)"
+  echo "  -e, --expect DECISION Expect DECISION in {allow,deny,ask} and fail on mismatch."
+  echo "                        When omitted the script accepts any decision and"
+  echo "                        only checks that the hook ran to completion."
   echo ""
   echo "Examples:"
   echo "  $0 validate-bash.sh test-input.json"
   echo "  $0 -v -t 30 validate-write.sh write-input.json"
+  echo "  $0 --expect deny guard.mjs input.json   # fail if hook does not deny"
   echo ""
   echo "Creates sample test input with:"
   echo "  $0 --create-sample <event-type>"
@@ -102,6 +106,7 @@ EOF
 # Parse arguments
 VERBOSE=false
 TIMEOUT=60
+EXPECT=""
 
 while [ $# -gt 0 ]; do
   case "$1" in
@@ -115,6 +120,17 @@ while [ $# -gt 0 ]; do
     -t|--timeout)
       TIMEOUT="$2"
       shift 2
+      ;;
+    -e|--expect)
+      EXPECT="$2"
+      shift 2
+      case "$EXPECT" in
+        allow|deny|ask) ;;
+        *)
+          echo "❌ Error: --expect must be one of: allow, deny, ask (got: $EXPECT)"
+          exit 1
+          ;;
+      esac
       ;;
     --create-sample)
       create_sample "$2"
@@ -242,6 +258,96 @@ fi
 
 echo ""
 echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
+
+# Determine the hook's actual decision so we can compare it with --expect.
+#
+# Per the hook output schema documented in
+# plugins/plugin-dev/skills/hook-development/SKILL.md and observed in the
+# shipped example hooks:
+#   - exit 2 is a hard "deny"
+#   - exit 0 with a `hookSpecificOutput.permissionDecision` field of "deny"
+#     is also a deny (programmatic deny, used when stderr is needed for
+#     structured output)
+#   - exit 0 with `permissionDecision: "ask"` is "ask"
+#   - exit 0 with `permissionDecision: "allow"` is "allow"
+#   - exit 0 with no JSON / no permissionDecision defaults to "allow"
+#     (matches Claude Code's behaviour for a hook that runs to completion
+#     and emits nothing)
+#
+# We extract the decision without relying on jq so the script keeps working
+# on hosts where jq is not installed. The hook output is small and the
+# values are constrained, so a targeted grep is sufficient and avoids
+# pulling in a dependency for a single field. If jq IS available we still
+# prefer it for correct handling of escaped JSON strings.
+extract_decision() {
+  local raw="$1"
+  [ -z "$raw" ] && return 1
+  if command -v jq >/dev/null 2>&1; then
+    # Only attempt jq if the output looks like a JSON object.
+    if printf '%s' "$raw" | grep -q '^{'; then
+      local v
+      v=$(printf '%s\n' "$raw" | jq -r '
+        if type == "object" then
+          ( .hookSpecificOutput.permissionDecision //
+            .permissionDecision //
+            empty )
+        else
+          empty
+        end
+      ' 2>/dev/null | head -1)
+      case "$v" in
+        allow|deny|ask) printf '%s\n' "$v"; return 0 ;;
+      esac
+    fi
+  fi
+  # Fallback: regex on the captured output. Matches either
+  #   "permissionDecision":"deny"   or   "permissionDecision": "deny"
+  # inside any JSON-looking payload.
+  local v
+  v=$(printf '%s\n' "$raw" \
+    | grep -oE '"permissionDecision"[[:space:]]*:[[:space:]]*"(allow|deny|ask)"' \
+    | head -1 \
+    | sed -E 's/.*"permissionDecision"[[:space:]]*:[[:space:]]*"(allow|deny|ask)".*/\1/')
+  case "$v" in
+    allow|deny|ask) printf '%s\n' "$v"; return 0 ;;
+  esac
+  return 1
+}
+
+actual_decision=""
+case $exit_code in
+  2)
+    actual_decision="deny"
+    ;;
+  0)
+    if extract_decision "$output" >/dev/null 2>&1; then
+      actual_decision=$(extract_decision "$output")
+    else
+      actual_decision="allow"
+    fi
+    ;;
+  *)
+    actual_decision=""
+    ;;
+esac
+
+# Decide pass/fail.
+# When --expect is given, the actual decision MUST match.
+# When --expect is omitted, today's behaviour is preserved: exit 0 and 2
+# both pass, anything else fails. This keeps existing callers working
+# unchanged.
+if [ -n "$EXPECT" ]; then
+  if [ -z "$actual_decision" ]; then
+    echo "❌ Hook did not produce a decision (exit $exit_code); expected $EXPECT"
+    exit 1
+  fi
+  if [ "$actual_decision" != "$EXPECT" ]; then
+    echo "❌ Decision mismatch: expected $EXPECT, got $actual_decision (exit $exit_code)"
+    exit 1
+  fi
+  echo "✅ Decision matches: $actual_decision"
+  exit 0
+fi
 
 if [ $exit_code -eq 0 ] || [ $exit_code -eq 2 ]; then
   echo "✅ Test completed successfully"
