@@ -13,8 +13,18 @@ if [[ ! -f "$SETTINGS_FILE" ]]; then
   exit 0
 fi
 
-# Parse YAML frontmatter (everything between --- markers)
-FRONTMATTER=$(sed -n '/^---$/,/^---$/{ /^---$/d; p; }' "$SETTINGS_FILE")
+# Parse YAML frontmatter (everything between --- markers).
+# Strip a leading UTF-8 BOM if present (issue #73158). PowerShell's
+# default UTF-8 encoding on Windows writes a BOM, which causes the
+# frontmatter regex below to silently miss the opening '---' marker.
+# A BOM is the three-byte sequence EF BB BF. The file is not modified
+# on disk; the stripped content is used only for the regex match.
+if [ "$(head -c 3 "$SETTINGS_FILE" 2>/dev/null | od -An -tx1 | tr -d ' \n')" = "efbbbf" ]; then
+  SETTINGS_CONTENT=$(tail -c +4 "$SETTINGS_FILE")
+else
+  SETTINGS_CONTENT=$(cat "$SETTINGS_FILE")
+fi
+FRONTMATTER=$(printf '%s\n' "$SETTINGS_CONTENT" | sed -n '/^---$/,/^---$/{ /^---$/d; p; }')
 
 # Extract configuration fields
 ENABLED=$(echo "$FRONTMATTER" | grep '^enabled:' | sed 's/enabled: *//' | sed 's/^"\(.*\)"$/\1/')

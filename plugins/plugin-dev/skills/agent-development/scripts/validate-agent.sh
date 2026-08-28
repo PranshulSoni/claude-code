@@ -30,7 +30,15 @@ fi
 echo "✅ File exists"
 
 # Check 2: Starts with ---
-FIRST_LINE=$(head -1 "$AGENT_FILE")
+# Strip a leading UTF-8 BOM (issue #73158) before reading the first
+# line so files written with PowerShell's default UTF-8 encoding on
+# Windows — which prepends EF BB BF — are still recognised as valid
+# frontmatter. The file is not modified on disk.
+if [ "$(head -c 3 "$AGENT_FILE" 2>/dev/null | od -An -tx1 | tr -d ' \n')" = "efbbbf" ]; then
+  FIRST_LINE=$(tail -c +4 "$AGENT_FILE" | head -1)
+else
+  FIRST_LINE=$(head -1 "$AGENT_FILE")
+fi
 if [ "$FIRST_LINE" != "---" ]; then
   echo "❌ File must start with YAML frontmatter (---)"
   exit 1
@@ -45,8 +53,18 @@ fi
 echo "✅ Frontmatter properly closed"
 
 # Extract frontmatter and system prompt
-FRONTMATTER=$(sed -n '/^---$/,/^---$/{ /^---$/d; p; }' "$AGENT_FILE")
-SYSTEM_PROMPT=$(awk '/^---$/{i++; next} i>=2' "$AGENT_FILE")
+# Strip a leading UTF-8 BOM if present (issue #73158). PowerShell's
+# default UTF-8 encoding on Windows writes a BOM, which causes the
+# frontmatter regex below to silently miss the opening '---' marker.
+# A BOM is the three-byte sequence EF BB BF. The file is not modified
+# on disk; the stripped content is used only for the regex match.
+if [ "$(head -c 3 "$AGENT_FILE" 2>/dev/null | od -An -tx1 | tr -d ' \n')" = "efbbbf" ]; then
+  AGENT_CONTENT=$(tail -c +4 "$AGENT_FILE")
+else
+  AGENT_CONTENT=$(cat "$AGENT_FILE")
+fi
+FRONTMATTER=$(printf '%s\n' "$AGENT_CONTENT" | sed -n '/^---$/,/^---$/{ /^---$/d; p; }')
+SYSTEM_PROMPT=$(printf '%s\n' "$AGENT_CONTENT" | awk '/^---$/{i++; next} i>=2')
 
 # Check 4: Required fields
 echo ""

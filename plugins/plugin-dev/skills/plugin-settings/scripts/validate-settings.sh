@@ -38,7 +38,16 @@ fi
 echo "✅ File is readable"
 
 # Check 3: Has frontmatter markers
-MARKER_COUNT=$(grep -c '^---$' "$SETTINGS_FILE" 2>/dev/null || echo "0")
+# Count '^---$' lines but also accept a leading UTF-8 BOM (issue
+# #73158): the first '---' line of a BOM-prefixed file starts with
+# EF BB BF, which the strict ^---$ regex would miss. We strip a
+# leading BOM from the file content before counting, without modifying
+# the file on disk.
+if [ "$(head -c 3 "$SETTINGS_FILE" 2>/dev/null | od -An -tx1 | tr -d ' \n')" = "efbbbf" ]; then
+  MARKER_COUNT=$(tail -c +4 "$SETTINGS_FILE" | grep -c '^---$' || echo "0")
+else
+  MARKER_COUNT=$(grep -c '^---$' "$SETTINGS_FILE" 2>/dev/null || echo "0")
+fi
 
 if [ "$MARKER_COUNT" -lt 2 ]; then
   echo "❌ Invalid frontmatter: found $MARKER_COUNT '---' markers (need at least 2)"
@@ -52,7 +61,17 @@ fi
 echo "✅ Frontmatter markers present"
 
 # Check 4: Extract and validate frontmatter
-FRONTMATTER=$(sed -n '/^---$/,/^---$/{ /^---$/d; p; }' "$SETTINGS_FILE")
+# Strip a leading UTF-8 BOM if present (issue #73158). PowerShell's
+# default UTF-8 encoding on Windows writes a BOM, which causes the
+# frontmatter regex below to silently miss the opening '---' marker.
+# A BOM is the three-byte sequence EF BB BF. The file is not modified
+# on disk; the stripped content is used only for the regex match.
+if [ "$(head -c 3 "$SETTINGS_FILE" 2>/dev/null | od -An -tx1 | tr -d ' \n')" = "efbbbf" ]; then
+  SETTINGS_CONTENT=$(tail -c +4 "$SETTINGS_FILE")
+else
+  SETTINGS_CONTENT=$(cat "$SETTINGS_FILE")
+fi
+FRONTMATTER=$(printf '%s\n' "$SETTINGS_CONTENT" | sed -n '/^---$/,/^---$/{ /^---$/d; p; }')
 
 if [ -z "$FRONTMATTER" ]; then
   echo "❌ Empty frontmatter (nothing between --- markers)"

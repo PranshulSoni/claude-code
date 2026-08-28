@@ -33,8 +33,20 @@ if [ ! -f "$FILE" ]; then
   exit 1
 fi
 
+# Strip a leading UTF-8 BOM if present (issue #73158). PowerShell's
+# default UTF-8 encoding on Windows writes a BOM, which causes the
+# frontmatter regex below to silently miss the opening '---' marker.
+# A BOM is the three-byte sequence EF BB BF. We read the file's first
+# three bytes and, if they match, read the rest of the file with the
+# BOM removed. The file is not modified on disk.
+if [ "$(head -c 3 "$FILE" 2>/dev/null | od -An -tx1 | tr -d ' \n')" = "efbbbf" ]; then
+  FILE_CONTENT=$(tail -c +4 "$FILE")
+else
+  FILE_CONTENT=$(cat "$FILE")
+fi
+
 # Extract frontmatter
-FRONTMATTER=$(sed -n '/^---$/,/^---$/{ /^---$/d; p; }' "$FILE")
+FRONTMATTER=$(printf '%s\n' "$FILE_CONTENT" | sed -n '/^---$/,/^---$/{ /^---$/d; p; }')
 
 if [ -z "$FRONTMATTER" ]; then
   echo "Error: No frontmatter found in $FILE" >&2
