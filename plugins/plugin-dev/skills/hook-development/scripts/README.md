@@ -36,11 +36,22 @@ Tests individual hook scripts with sample input before deploying to Claude Code.
 ```
 
 **Options:**
+- `-h, --help` - Show this help message
 - `-v, --verbose` - Show detailed execution information
 - `-t, --timeout N` - Set timeout in seconds (default: 60)
+- `-e, --expect DECISION` - Expect the hook to produce one of
+  `allow`|`deny`|`ask` and fail (exit 1) on mismatch. When omitted, the
+  script accepts any decision and only checks that the hook ran to
+  completion. Useful for catching hooks that allow what they were
+  written to block (#83800).
+- `-c, --config FILE` - Validate the supplied hook against the
+  matcher(s) in a `hooks.json` file. The script reports which matchers
+  select the hook and exits 1 if the hook would never run for the
+  given event/tool_name in a real session. Useful for catching hooks
+  wired to the wrong tool (#83801).
 - `--create-sample <event-type>` - Generate sample test input
 
-**Example:**
+**Examples:**
 ```bash
 # Create sample test input
 ./test-hook.sh --create-sample PreToolUse > test-input.json
@@ -50,6 +61,12 @@ Tests individual hook scripts with sample input before deploying to Claude Code.
 
 # Test with verbose output and custom timeout
 ./test-hook.sh -v -t 30 my-hook.sh test-input.json
+
+# Assert the hook denies a specific event (catches "guard never fires" bugs)
+./test-hook.sh --expect deny my-hook.sh test-input.json
+
+# Validate the hook is selected by the matchers in hooks.json
+./test-hook.sh -c ../hooks/hooks.json my-hook.sh test-input.json
 ```
 
 **Features:**
@@ -58,6 +75,13 @@ Tests individual hook scripts with sample input before deploying to Claude Code.
 - Validates output JSON
 - Shows exit codes and their meanings
 - Captures environment file output
+- Optionally asserts a specific hook decision via `--expect` (allow|deny|ask)
+- Optionally validates matcher wiring via `--config <hooks.json>`
+
+**Exit code:**
+- 0 - test passed (or legacy "exit 0 OR 2 = pass" when no --expect/--config)
+- 1 - `--expect` mismatch, `--config` rejects the hook, missing args,
+  invalid input file, or hook exited with an unexpected code
 
 ## hook-linter.sh
 
