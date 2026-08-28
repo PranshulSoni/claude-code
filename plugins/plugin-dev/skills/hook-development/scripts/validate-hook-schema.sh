@@ -17,6 +17,14 @@ if [ $# -eq 0 ]; then
   exit 1
 fi
 
+# jq is required by every JSON step below. The first of those calls silences
+# jq's stderr, so without this guard a missing jq surfaces as an "invalid
+# JSON" error on a perfectly valid file instead of a missing dependency.
+if ! command -v jq >/dev/null 2>&1; then
+  echo "❌ Error: jq is required but not installed: https://jqlang.github.io/jq/download/" >&2
+  exit 1
+fi
+
 HOOKS_FILE="$1"
 
 if [ ! -f "$HOOKS_FILE" ]; then
