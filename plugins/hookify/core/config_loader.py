@@ -248,7 +248,11 @@ def load_rule_file(file_path: str) -> Optional[Rule]:
         Rule object or None if file is invalid.
     """
     try:
-        with open(file_path, 'r', encoding='utf-8') as f:
+        # encoding='utf-8-sig' strips a leading UTF-8 BOM if present
+        # (issue #89026) so rule files written by PowerShell's default
+        # UTF-8 encoding on Windows still load. On a non-BOM file it
+        # behaves identically to 'utf-8'.
+        with open(file_path, 'r', encoding='utf-8-sig') as f:
             content = f.read()
 
         frontmatter, message = extract_frontmatter(content)

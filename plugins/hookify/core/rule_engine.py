@@ -209,7 +209,11 @@ class RuleEngine:
                 transcript_path = input_data.get('transcript_path')
                 if transcript_path:
                     try:
-                        with open(transcript_path, 'r', encoding='utf-8') as f:
+                        # encoding='utf-8-sig' is a safe default: it
+                        # strips a BOM if present and is otherwise
+                        # identical to 'utf-8'. The hook is meant to
+                        # work on every host locale (cp1252, UTF-8).
+                        with open(transcript_path, 'r', encoding='utf-8-sig') as f:
                             return f.read()
                     except FileNotFoundError:
                         print(f"Warning: Transcript file not found: {transcript_path}", file=sys.stderr)
@@ -254,9 +258,13 @@ class RuleEngine:
             if field == 'file_path':
                 return tool_input.get('file_path', '')
             elif field in ['new_text', 'content']:
-                # Concatenate all edits
-                edits = tool_input.get('edits', [])
-                return ' '.join(e.get('new_string', '') for e in edits)
+                # Concatenate all edits. Malformed entries (non-dict
+                # values in the edits array) are skipped to avoid a
+                # crash that would silently disable MultiEdit rules.
+                edits = tool_input.get('edits', []) or []
+                return ' '.join(
+                    e.get('new_string', '') for e in edits if isinstance(e, dict)
+                )
 
         return None
 
