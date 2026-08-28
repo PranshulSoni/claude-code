@@ -209,7 +209,7 @@ class RuleEngine:
                 transcript_path = input_data.get('transcript_path')
                 if transcript_path:
                     try:
-                        with open(transcript_path, 'r') as f:
+                        with open(transcript_path, 'r', encoding='utf-8') as f:
                             return f.read()
                     except FileNotFoundError:
                         print(f"Warning: Transcript file not found: {transcript_path}", file=sys.stderr)
@@ -224,8 +224,15 @@ class RuleEngine:
                         print(f"Warning: Encoding error in transcript {transcript_path}: {e}", file=sys.stderr)
                         return ''
             elif field == 'user_prompt':
-                # For UserPromptSubmit events
-                return input_data.get('user_prompt', '')
+                # For UserPromptSubmit events. Claude Code's
+                # UserPromptSubmit payload puts the prompt under the
+                # key 'prompt' (not 'user_prompt'). Accept both so
+                # existing user rule files that say 'field: user_prompt'
+                # (the documented form) keep working without users
+                # having to edit them.
+                return (input_data.get('user_prompt')
+                        or input_data.get('prompt')
+                        or '')
 
         # Handle special cases by tool type
         if tool_name == 'Bash':
