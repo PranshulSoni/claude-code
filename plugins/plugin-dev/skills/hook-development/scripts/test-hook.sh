@@ -390,7 +390,8 @@ if [ -n "$CONFIG" ]; then
     # misconfiguration.
     selected=0
     for c in "${selected_cmds[@]}"; do
-      cb=$(basename -- "$c" 2>/dev/null)
+      target_cmd=$(printf '%s' "$c" | awk '{print $NF}')
+      cb=$(basename -- "$target_cmd" 2>/dev/null)
       hb=$(basename -- "$HOOK_SCRIPT" 2>/dev/null)
       if [ "$cb" = "$hb" ]; then
         selected=1
@@ -524,7 +525,8 @@ extract_decision() {
       local v
       v=$(printf '%s\n' "$raw" | jq -r '
         if type == "object" then
-          ( .hookSpecificOutput.permissionDecision //
+          ( .decision //
+            .hookSpecificOutput.permissionDecision //
             .permissionDecision //
             empty )
         else
@@ -533,19 +535,21 @@ extract_decision() {
       ' 2>/dev/null | head -1)
       case "$v" in
         allow|deny|ask) printf '%s\n' "$v"; return 0 ;;
+        block) printf 'deny\n'; return 0 ;;
       esac
     fi
   fi
   # Fallback: regex on the captured output. Matches either
-  #   "permissionDecision":"deny"   or   "permissionDecision": "deny"
+  #   "permissionDecision":"deny"   or   "decision": "block"
   # inside any JSON-looking payload.
   local v
   v=$(printf '%s\n' "$raw" \
-    | grep -oE '"permissionDecision"[[:space:]]*:[[:space:]]*"(allow|deny|ask)"' \
+    | grep -oE '"(permissionDecision|decision)"[[:space:]]*:[[:space:]]*"(allow|deny|ask|block)"' \
     | head -1 \
-    | sed -E 's/.*"permissionDecision"[[:space:]]*:[[:space:]]*"(allow|deny|ask)".*/\1/')
+    | sed -E 's/.*"(permissionDecision|decision)"[[:space:]]*:[[:space:]]*"(allow|deny|ask|block)".*/\2/')
   case "$v" in
     allow|deny|ask) printf '%s\n' "$v"; return 0 ;;
+    block) printf 'deny\n'; return 0 ;;
   esac
   return 1
 }
