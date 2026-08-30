@@ -63,6 +63,10 @@ class Rule:
                 field = 'command'
             elif event == 'file':
                 field = 'new_text'
+            elif event in ['prompt', 'UserPromptSubmit']:
+                field = 'user_prompt'
+            elif event == 'stop':
+                field = 'transcript'
             else:
                 field = 'content'
 
@@ -91,6 +95,7 @@ def extract_frontmatter(content: str) -> tuple[Dict[str, Any], str]:
 
     Supports multi-line dictionary items in lists by preserving indentation.
     """
+    content = content.lstrip('\ufeff')
     if not content.startswith('---'):
         return {}, content
 

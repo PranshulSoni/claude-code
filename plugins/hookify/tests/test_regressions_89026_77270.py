@@ -219,3 +219,34 @@ class TestMultiEditMalformedEdits:
             },
         )
         assert "x" in result.get("systemMessage", "")
+
+
+class TestLegacyPatternConversion:
+    """Legacy pattern field inference for prompt and stop events."""
+
+    def test_legacy_prompt_event_infers_user_prompt(self, tmp_path):
+        rule_file = tmp_path / "hookify.legacy-prompt.local.md"
+        rule_file.write_text(
+            "---\nname: legacy-prompt\nenabled: true\nevent: prompt\npattern: debug\naction: warn\n---\nPrompt debugging warning\n",
+            encoding="utf-8",
+        )
+        rule = load_rule_file(str(rule_file))
+        assert rule is not None
+        assert len(rule.conditions) == 1
+        assert rule.conditions[0].field == "user_prompt"
+
+        engine = RuleEngine()
+        res = engine.evaluate_rules([rule], {"hook_event_name": "UserPromptSubmit", "prompt": "can you debug this?"})
+        assert "Prompt debugging warning" in res.get("systemMessage", "")
+
+    def test_legacy_stop_event_infers_transcript(self, tmp_path):
+        rule_file = tmp_path / "hookify.legacy-stop.local.md"
+        rule_file.write_text(
+            "---\nname: legacy-stop\nenabled: true\nevent: stop\npattern: DONE\naction: block\n---\nStop check\n",
+            encoding="utf-8",
+        )
+        rule = load_rule_file(str(rule_file))
+        assert rule is not None
+        assert len(rule.conditions) == 1
+        assert rule.conditions[0].field == "transcript"
+
