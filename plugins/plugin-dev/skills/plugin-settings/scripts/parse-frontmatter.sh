@@ -36,17 +36,9 @@ fi
 # Strip a leading UTF-8 BOM if present (issue #73158). PowerShell's
 # default UTF-8 encoding on Windows writes a BOM, which causes the
 # frontmatter regex below to silently miss the opening '---' marker.
-# A BOM is the three-byte sequence EF BB BF. We read the file's first
-# three bytes and, if they match, read the rest of the file with the
-# BOM removed. The file is not modified on disk.
-if [ "$(head -c 3 "$FILE" 2>/dev/null | od -An -tx1 | tr -d ' \n')" = "efbbbf" ]; then
-  FILE_CONTENT=$(tail -c +4 "$FILE")
-else
-  FILE_CONTENT=$(cat "$FILE")
-fi
-
-# Extract frontmatter
-FRONTMATTER=$(printf '%s\n' "$FILE_CONTENT" | sed -n '/^---$/,/^---$/{ /^---$/d; p; }')
+# A BOM is the three-byte sequence EF BB BF. The file is not modified
+# on disk; the stripped stream is used for parsing.
+FRONTMATTER=$(sed '1s/^\xef\xbb\xbf//' "$FILE" | sed -n '/^---$/,/^---$/{ /^---$/d; p; }')
 
 if [ -z "$FRONTMATTER" ]; then
   echo "Error: No frontmatter found in $FILE" >&2
@@ -60,7 +52,7 @@ if [ -z "$FIELD" ]; then
 fi
 
 # Extract specific field
-VALUE=$(echo "$FRONTMATTER" | grep "^${FIELD}:" | sed "s/${FIELD}: *//" | sed 's/^"\(.*\)"$/\1/' | sed "s/^'\\(.*\\)'$/\\1/")
+VALUE=$(echo "$FRONTMATTER" | grep "^${FIELD}:" | sed "s/${FIELD}: *//" | sed 's/^"\(.*\)"$/\1/' | sed "s/^'\\(.*\\)'$/\\1/" || true)
 
 if [ -z "$VALUE" ]; then
   echo "Error: Field '$FIELD' not found in frontmatter" >&2

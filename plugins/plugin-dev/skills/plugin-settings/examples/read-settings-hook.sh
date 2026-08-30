@@ -18,18 +18,13 @@ fi
 # default UTF-8 encoding on Windows writes a BOM, which causes the
 # frontmatter regex below to silently miss the opening '---' marker.
 # A BOM is the three-byte sequence EF BB BF. The file is not modified
-# on disk; the stripped content is used only for the regex match.
-if [ "$(head -c 3 "$SETTINGS_FILE" 2>/dev/null | od -An -tx1 | tr -d ' \n')" = "efbbbf" ]; then
-  SETTINGS_CONTENT=$(tail -c +4 "$SETTINGS_FILE")
-else
-  SETTINGS_CONTENT=$(cat "$SETTINGS_FILE")
-fi
-FRONTMATTER=$(printf '%s\n' "$SETTINGS_CONTENT" | sed -n '/^---$/,/^---$/{ /^---$/d; p; }')
+# on disk; the stripped stream is used for parsing.
+FRONTMATTER=$(sed '1s/^\xef\xbb\xbf//' "$SETTINGS_FILE" | sed -n '/^---$/,/^---$/{ /^---$/d; p; }')
 
 # Extract configuration fields
-ENABLED=$(echo "$FRONTMATTER" | grep '^enabled:' | sed 's/enabled: *//' | sed 's/^"\(.*\)"$/\1/')
-STRICT_MODE=$(echo "$FRONTMATTER" | grep '^strict_mode:' | sed 's/strict_mode: *//' | sed 's/^"\(.*\)"$/\1/')
-MAX_SIZE=$(echo "$FRONTMATTER" | grep '^max_file_size:' | sed 's/max_file_size: *//')
+ENABLED=$(echo "$FRONTMATTER" | grep '^enabled:' | sed 's/enabled: *//' | sed 's/^"\(.*\)"$/\1/' || true)
+STRICT_MODE=$(echo "$FRONTMATTER" | grep '^strict_mode:' | sed 's/strict_mode: *//' | sed 's/^"\(.*\)"$/\1/' || true)
+MAX_SIZE=$(echo "$FRONTMATTER" | grep '^max_file_size:' | sed 's/max_file_size: *//' || true)
 
 # Quick exit if disabled
 if [[ "$ENABLED" != "true" ]]; then

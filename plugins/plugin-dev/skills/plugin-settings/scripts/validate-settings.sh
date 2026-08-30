@@ -41,13 +41,8 @@ echo "✅ File is readable"
 # Count '^---$' lines but also accept a leading UTF-8 BOM (issue
 # #73158): the first '---' line of a BOM-prefixed file starts with
 # EF BB BF, which the strict ^---$ regex would miss. We strip a
-# leading BOM from the file content before counting, without modifying
-# the file on disk.
-if [ "$(head -c 3 "$SETTINGS_FILE" 2>/dev/null | od -An -tx1 | tr -d ' \n')" = "efbbbf" ]; then
-  MARKER_COUNT=$(tail -c +4 "$SETTINGS_FILE" | grep -c '^---$' || echo "0")
-else
-  MARKER_COUNT=$(grep -c '^---$' "$SETTINGS_FILE" 2>/dev/null || echo "0")
-fi
+# leading BOM before counting, without modifying the file on disk.
+MARKER_COUNT=$(sed '1s/^\xef\xbb\xbf//' "$SETTINGS_FILE" | grep -c '^---$' || echo "0")
 
 if [ "$MARKER_COUNT" -lt 2 ]; then
   echo "❌ Invalid frontmatter: found $MARKER_COUNT '---' markers (need at least 2)"
@@ -61,17 +56,8 @@ fi
 echo "✅ Frontmatter markers present"
 
 # Check 4: Extract and validate frontmatter
-# Strip a leading UTF-8 BOM if present (issue #73158). PowerShell's
-# default UTF-8 encoding on Windows writes a BOM, which causes the
-# frontmatter regex below to silently miss the opening '---' marker.
-# A BOM is the three-byte sequence EF BB BF. The file is not modified
-# on disk; the stripped content is used only for the regex match.
-if [ "$(head -c 3 "$SETTINGS_FILE" 2>/dev/null | od -An -tx1 | tr -d ' \n')" = "efbbbf" ]; then
-  SETTINGS_CONTENT=$(tail -c +4 "$SETTINGS_FILE")
-else
-  SETTINGS_CONTENT=$(cat "$SETTINGS_FILE")
-fi
-FRONTMATTER=$(printf '%s\n' "$SETTINGS_CONTENT" | sed -n '/^---$/,/^---$/{ /^---$/d; p; }')
+# Strip leading UTF-8 BOM if present
+FRONTMATTER=$(sed '1s/^\xef\xbb\xbf//' "$SETTINGS_FILE" | sed -n '/^---$/,/^---$/{ /^---$/d; p; }')
 
 if [ -z "$FRONTMATTER" ]; then
   echo "❌ Empty frontmatter (nothing between --- markers)"
@@ -102,7 +88,7 @@ for field in enabled strict_mode; do
 done
 
 # Check 8: Check body exists
-BODY=$(awk '/^---$/{i++; next} i>=2' "$SETTINGS_FILE")
+BODY=$(sed '1s/^\xef\xbb\xbf//' "$SETTINGS_FILE" | awk '/^---$/{i++; next} i>=2')
 
 echo ""
 if [ -n "$BODY" ]; then
