@@ -136,3 +136,33 @@ class TestStopHookErrorHandling:
         assert res.returncode == 0
         assert "Detected <promise>TASK COMPLETE</promise>" in res.stdout
         assert not state_file.exists()
+
+    def test_promise_text_without_tags_does_not_trigger_premature_exit(self, tmp_path):
+        claude_dir = tmp_path / ".claude"
+        claude_dir.mkdir()
+        state_file = claude_dir / "ralph-loop.local.md"
+        state_file.write_text(
+            '---\niteration: 1\nmax_iterations: 5\ncompletion_promise: "TASK COMPLETE"\n---\nDo the task\n',
+            encoding="utf-8",
+        )
+        transcript = tmp_path / "transcript.jsonl"
+        transcript.write_text(
+            json.dumps({
+                "role": "assistant",
+                "message": {
+                    "content": [{"type": "text", "text": "I am working on TASK COMPLETE but not ready yet"}]
+                }
+            }) + "\n",
+            encoding="utf-8",
+        )
+
+        transcript_posix = str(transcript).replace("\\", "/")
+        payload = json.dumps({"transcript_path": transcript_posix})
+        res = run_stop_hook(tmp_path, payload)
+        assert res.returncode == 0
+        assert "Detected <promise>" not in res.stdout
+        # State file should still exist and iteration updated to 2
+        assert state_file.exists()
+        content = state_file.read_text(encoding="utf-8")
+        assert "iteration: 2" in content
+
