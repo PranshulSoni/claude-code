@@ -29,8 +29,8 @@ if [ ! -f "$AGENT_FILE" ]; then
 fi
 echo "✅ File exists"
 
-# Check 2: Starts with ---
-FIRST_LINE=$(head -1 "$AGENT_FILE")
+# Check 2: Starts with --- (strip leading UTF-8 BOM if present)
+FIRST_LINE=$(sed '1s/^\xef\xbb\xbf//' "$AGENT_FILE" | head -1)
 if [ "$FIRST_LINE" != "---" ]; then
   echo "❌ File must start with YAML frontmatter (---)"
   exit 1
@@ -38,15 +38,15 @@ fi
 echo "✅ Starts with frontmatter"
 
 # Check 3: Has closing ---
-if ! tail -n +2 "$AGENT_FILE" | grep -q '^---$'; then
+if ! sed '1s/^\xef\xbb\xbf//' "$AGENT_FILE" | tail -n +2 | grep -q '^---$'; then
   echo "❌ Frontmatter not closed (missing second ---)"
   exit 1
 fi
 echo "✅ Frontmatter properly closed"
 
-# Extract frontmatter and system prompt
-FRONTMATTER=$(sed -n '/^---$/,/^---$/{ /^---$/d; p; }' "$AGENT_FILE")
-SYSTEM_PROMPT=$(awk '/^---$/{i++; next} i>=2' "$AGENT_FILE")
+# Extract frontmatter and system prompt (stripping leading BOM if present)
+FRONTMATTER=$(sed '1s/^\xef\xbb\xbf//' "$AGENT_FILE" | sed -n '/^---$/,/^---$/{ /^---$/d; p; }')
+SYSTEM_PROMPT=$(sed '1s/^\xef\xbb\xbf//' "$AGENT_FILE" | awk '/^---$/{i++; next} i>=2')
 
 # Check 4: Required fields
 echo ""
@@ -56,74 +56,90 @@ error_count=0
 warning_count=0
 
 # Check name field
-NAME=$(echo "$FRONTMATTER" | grep '^name:' | sed 's/name: *//' | sed 's/^"\(.*\)"$/\1/')
+NAME=$(echo "$FRONTMATTER" | grep '^name:' | sed 's/name: *//' | sed 's/^"\(.*\)"$/\1/' || true)
 
 if [ -z "$NAME" ]; then
   echo "❌ Missing required field: name"
-  error_count=$((error_count+1))
+  error_count=$((error_count + 1))
 else
   echo "✅ name: $NAME"
 
   # Validate name format
   if ! [[ "$NAME" =~ ^[a-zA-Z0-9][a-zA-Z0-9-]*[a-zA-Z0-9]$ ]]; then
     echo "❌ name must start/end with alphanumeric and contain only letters, numbers, hyphens"
-    error_count=$((error_count+1))
+    error_count=$((error_count + 1))
   fi
 
   # Validate name length
   name_length=${#NAME}
   if [ $name_length -lt 3 ]; then
     echo "❌ name too short (minimum 3 characters)"
-    error_count=$((error_count+1))
+    error_count=$((error_count + 1))
   elif [ $name_length -gt 50 ]; then
     echo "❌ name too long (maximum 50 characters)"
-    error_count=$((error_count+1))
+    error_count=$((error_count + 1))
   fi
 
   # Check for generic names
   if [[ "$NAME" =~ ^(helper|assistant|agent|tool)$ ]]; then
     echo "⚠️  name is too generic: $NAME"
-    warning_count=$((warning_count+1))
+    warning_count=$((warning_count + 1))
   fi
 fi
 
-# Check description field
-DESCRIPTION=$(echo "$FRONTMATTER" | grep '^description:' | sed 's/description: *//')
+# Check description field (supporting multiline and YAML block scalars)
+DESCRIPTION=$(echo "$FRONTMATTER" | awk '
+  /^description:/ {
+    sub(/^description:[[:space:]]*[|>[-]*/, "")
+    in_desc=1
+    desc=$0
+    next
+  }
+  in_desc && /^[a-zA-Z0-9_-]+:[[:space:]]*/ {
+    in_desc=0
+  }
+  in_desc {
+    if (desc == "") desc = $0; else desc = desc "\n" $0
+  }
+  END {
+    print desc
+  }
+')
 
 if [ -z "$DESCRIPTION" ]; then
   echo "❌ Missing required field: description"
-  error_count=$((error_count+1))
+  error_count=$((error_count + 1))
 else
   desc_length=${#DESCRIPTION}
   echo "✅ description: ${desc_length} characters"
 
   if [ $desc_length -lt 10 ]; then
     echo "⚠️  description too short (minimum 10 characters recommended)"
-    warning_count=$((warning_count+1))
+    warning_count=$((warning_count + 1))
   elif [ $desc_length -gt 5000 ]; then
     echo "⚠️  description very long (over 5000 characters)"
-    warning_count=$((warning_count+1))
+    warning_count=$((warning_count + 1))
   fi
 
   # Check for example blocks
   if ! echo "$DESCRIPTION" | grep -q '<example>'; then
     echo "⚠️  description should include <example> blocks for triggering"
-    warning_count=$((warning_count+1))
+    warning_count=$((warning_count + 1))
   fi
 
   # Check for "Use this agent when" pattern
   if ! echo "$DESCRIPTION" | grep -qi 'use this agent when'; then
     echo "⚠️  description should start with 'Use this agent when...'"
-    warning_count=$((warning_count+1))
+    warning_count=$((warning_count + 1))
   fi
 fi
 
 # Check model field
-MODEL=$(echo "$FRONTMATTER" | grep '^model:' | sed 's/model: *//')
+MODEL=$(echo "$FRONTMATTER" | grep '^model:' | sed 's/model: *//' || true)
 
 if [ -z "$MODEL" ]; then
   echo "❌ Missing required field: model"
-  error_count=$((error_count+1))
+  error_count=$((error_count + 1))
 else
   echo "✅ model: $MODEL"
 
@@ -133,17 +149,17 @@ else
       ;;
     *)
       echo "⚠️  Unknown model: $MODEL (valid: inherit, sonnet, opus, haiku)"
-      warning_count=$((warning_count+1))
+      warning_count=$((warning_count + 1))
       ;;
   esac
 fi
 
 # Check color field
-COLOR=$(echo "$FRONTMATTER" | grep '^color:' | sed 's/color: *//')
+COLOR=$(echo "$FRONTMATTER" | grep '^color:' | sed 's/color: *//' || true)
 
 if [ -z "$COLOR" ]; then
   echo "❌ Missing required field: color"
-  error_count=$((error_count+1))
+  error_count=$((error_count + 1))
 else
   echo "✅ color: $COLOR"
 
@@ -153,13 +169,13 @@ else
       ;;
     *)
       echo "⚠️  Unknown color: $COLOR (valid: blue, cyan, green, yellow, magenta, red)"
-      warning_count=$((warning_count+1))
+      warning_count=$((warning_count + 1))
       ;;
   esac
 fi
 
 # Check tools field (optional)
-TOOLS=$(echo "$FRONTMATTER" | grep '^tools:' | sed 's/tools: *//')
+TOOLS=$(echo "$FRONTMATTER" | grep '^tools:' | sed 's/tools: *//' || true)
 
 if [ -n "$TOOLS" ]; then
   echo "✅ tools: $TOOLS"
@@ -173,23 +189,23 @@ echo "Checking system prompt..."
 
 if [ -z "$SYSTEM_PROMPT" ]; then
   echo "❌ System prompt is empty"
-  error_count=$((error_count+1))
+  error_count=$((error_count + 1))
 else
   prompt_length=${#SYSTEM_PROMPT}
   echo "✅ System prompt: $prompt_length characters"
 
   if [ $prompt_length -lt 20 ]; then
     echo "❌ System prompt too short (minimum 20 characters)"
-    error_count=$((error_count+1))
+    error_count=$((error_count + 1))
   elif [ $prompt_length -gt 10000 ]; then
     echo "⚠️  System prompt very long (over 10,000 characters)"
-    warning_count=$((warning_count+1))
+    warning_count=$((warning_count + 1))
   fi
 
   # Check for second person
   if ! echo "$SYSTEM_PROMPT" | grep -q "You are\|You will\|Your"; then
     echo "⚠️  System prompt should use second person (You are..., You will...)"
-    warning_count=$((warning_count+1))
+    warning_count=$((warning_count + 1))
   fi
 
   # Check for structure
