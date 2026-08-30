@@ -24,10 +24,10 @@ FRONTMATTER=$(sed -n '/^---$/,/^---$/{ /^---$/d; p; }' "$RALPH_STATE_FILE")
 # `set -euo pipefail`. Append `|| true` so the assignment always succeeds;
 # the handler at the `if [[ ! "$ITERATION" =~ ^[0-9]+$ ]]` check below
 # produces the user-facing diagnostic and removes the corrupt state file.
-ITERATION=$(echo "$FRONTMATTER" | grep '^iteration:' | sed 's/iteration: *//' || true)
-MAX_ITERATIONS=$(echo "$FRONTMATTER" | grep '^max_iterations:' | sed 's/max_iterations: *//' || true)
+ITERATION=$(echo "$FRONTMATTER" | grep '^iteration:' | sed 's/iteration: *//' | tr -d '\r' || true)
+MAX_ITERATIONS=$(echo "$FRONTMATTER" | grep '^max_iterations:' | sed 's/max_iterations: *//' | tr -d '\r' || true)
 # Extract completion_promise and strip surrounding quotes if present
-COMPLETION_PROMISE=$(echo "$FRONTMATTER" | grep '^completion_promise:' | sed 's/completion_promise: *//' | sed 's/^"\(.*\)"$/\1/' || true)
+COMPLETION_PROMISE=$(echo "$FRONTMATTER" | grep '^completion_promise:' | sed 's/completion_promise: *//' | sed 's/^"\(.*\)"$/\1/' | tr -d '\r' || true)
 
 # Validate numeric fields before arithmetic operations
 if [[ ! "$ITERATION" =~ ^[0-9]+$ ]]; then
@@ -60,7 +60,7 @@ if [[ $MAX_ITERATIONS -gt 0 ]] && [[ $ITERATION -ge $MAX_ITERATIONS ]]; then
 fi
 
 # Get transcript path from hook input
-TRANSCRIPT_PATH=$(echo "$HOOK_INPUT" | jq -r '.transcript_path')
+TRANSCRIPT_PATH=$(echo "$HOOK_INPUT" | jq -r '.transcript_path // empty' 2>/dev/null | tr -d '\r' || true)
 
 if [[ ! -f "$TRANSCRIPT_PATH" ]]; then
   echo "⚠️  Ralph loop: Transcript file not found" >&2
@@ -73,7 +73,7 @@ fi
 
 # Read last assistant message from transcript (JSONL format - one JSON per line)
 # First check if there are any assistant messages
-if ! grep -q '"role":"assistant"' "$TRANSCRIPT_PATH"; then
+if ! grep -E -q '"role"[[:space:]]*:[[:space:]]*"assistant"' "$TRANSCRIPT_PATH"; then
   echo "⚠️  Ralph loop: No assistant messages found in transcript" >&2
   echo "   Transcript: $TRANSCRIPT_PATH" >&2
   echo "   This is unusual and may indicate a transcript format issue" >&2
@@ -83,7 +83,7 @@ if ! grep -q '"role":"assistant"' "$TRANSCRIPT_PATH"; then
 fi
 
 # Extract last assistant message with explicit error handling
-LAST_LINE=$(grep '"role":"assistant"' "$TRANSCRIPT_PATH" | tail -1)
+LAST_LINE=$(grep -E '"role"[[:space:]]*:[[:space:]]*"assistant"' "$TRANSCRIPT_PATH" | tail -1)
 if [[ -z "$LAST_LINE" ]]; then
   echo "⚠️  Ralph loop: Failed to extract last assistant message" >&2
   echo "   Ralph loop is stopping." >&2
